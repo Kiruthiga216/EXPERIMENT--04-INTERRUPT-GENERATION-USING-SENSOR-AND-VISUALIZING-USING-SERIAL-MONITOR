@@ -126,157 +126,87 @@ The diagram below shows how the GPIO pins are connected to the 16 interrupt line
 
 ## STM 32 CUBE PROGRAM :
 ```
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
-
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "stdio.h"
-#include"stdbool.h"
-bool IRSENSOR;
-void IRPAIR();
+#include "stdbool.h"
 
-/* Redirect printf to UART */
+/* Global Variables ---------------------------------------------------------*/
+bool IRSENSOR_STATE = 1;  // last known state
+bool current_IR_state;
+
+/* Function Prototypes ------------------------------------------------------*/
+void IRPAIR(void);
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_USART2_UART_Init(void);
+
+/* UART Handle --------------------------------------------------------------*/
+UART_HandleTypeDef huart2;
+
+/* Redirect printf to UART --------------------------------------------------*/
 #if defined(_ICCARM) || defined(_ARMCC_VERSION)
 #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
 #elif defined(__GNUC__)
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #endif
 
-/* Private variables ---------------------------------------------------------*/
-UART_HandleTypeDef huart2;
-
-/* Private function prototypes -----------------------------------------------*/
-void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
-static void MX_USART2_UART_Init(void);
-
-/* USER CODE BEGIN PV */
-/* USER CODE END PV */
-
-int main(void)
-{
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
-
-  /* Configure the system clock */
-  SystemClock_Config();
-
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_USART2_UART_Init();
-
-  /* USER CODE BEGIN 2 */
-  printf("System Initialized\n");
-  /* USER CODE END 2 */
-
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-	  IRPAIR();
-	  /* You can add application code here */
-  }
-  /* USER CODE END WHILE */
-}
-
-/* Callback function for EXTI interrupts */
-void IRPAIR()
-{
-IRSENSOR = HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_4);
-if(IRSENSOR==0)
-{
-HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
-printf("Obstacle Detected\n");
-HAL_Delay(1000);
-HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
-printf("Obstacle not Detected\n");
-HAL_Delay(1000);
-}
-//else
-//{
-//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
-//printf("Obstacle not Detected\n");
-//HAL_Delay(1000); 
-//} 
-}
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-  if (GPIO_Pin == GPIO_PIN_4)   // Ensure correct pin
-  {
-    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_SET)
-    {
-      printf("INTERRUPT GENERATED\n");
-    }
-  }
-}
-
-/* Redirect printf output to UART */
 PUTCHAR_PROTOTYPE
 {
   HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
   return ch;
 }
 
-/**
-  * @brief System Clock Configuration
-  * @retval None
-  */
-void SystemClock_Config(void)
+/* Main --------------------------------------------------------------------*/
+int main(void)
 {
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  HAL_Init();
+  SystemClock_Config();
+  MX_GPIO_Init();
+  MX_USART2_UART_Init();
 
-  /** Configure the main internal regulator output voltage */
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE2);
+  printf("System Initialized\n");
 
-  /** Initializes the CPU, AHB and APB buses clocks */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
-  RCC_OscInitStruct.MSIState = RCC_MSI_ON;
-  RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
-
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  while (1)
   {
-    Error_Handler();
-  }
-
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK3 | RCC_CLOCKTYPE_HCLK
-                              | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1
-                              | RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.AHBCLK3Divider = RCC_SYSCLK_DIV1;
-
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
-  {
-    Error_Handler();
+    IRPAIR();
+    HAL_Delay(200); // small delay to avoid spamming UART
   }
 }
 
-/**
-  * @brief USART2 Initialization Function
-  * @retval None
-  */
+/* IR Sensor Check Function ------------------------------------------------*/
+void IRPAIR(void)
+{
+  current_IR_state = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4);
+
+  // Check if state changed since last read
+  if (current_IR_state != IRSENSOR_STATE)
+  {
+    IRSENSOR_STATE = current_IR_state; // update last state
+
+    if (current_IR_state == GPIO_PIN_RESET)
+    {
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+      printf("OBSTACLE DETECTED\n");
+    }
+    else
+    {
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
+      printf("OBSTACLE NOT DETECTED\n");
+    }
+  }
+}
+
+/* GPIO External Interrupt Callback ---------------------------------------*/
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == GPIO_PIN_4)
+  {
+    printf("INTERRUPT GENERATED\n");
+  }
+}
+
+/* USART2 Initialization ---------------------------------------------------*/
 static void MX_USART2_UART_Init(void)
 {
   huart2.Instance = USART2;
@@ -294,31 +224,62 @@ static void MX_USART2_UART_Init(void)
   }
 }
 
-/**
-  * @brief GPIO Initialization Function
-  * @retval None
-  */
+/* GPIO Initialization -----------------------------------------------------*/
 static void MX_GPIO_Init(void)
 {
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-  /* Configure PB4 as external interrupt pin */
+  /* PB4 - IR Sensor Input */
   GPIO_InitStruct.Pin = GPIO_PIN_4;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;   // INPUT mode (not interrupt)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /* Enable EXTI line interrupt */
-  HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI4_IRQn);
+  /* PB5 - LED Output */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 }
 
-/**
-  * @brief Error Handler
-  * @retval None
-  */
+/* System Clock Configuration ---------------------------------------------*/
+void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE2);
+
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
+  RCC_OscInitStruct.MSIState = RCC_MSI_ON;
+  RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK3 | RCC_CLOCKTYPE_HCLK |
+                                RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 |
+                                RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.AHBCLK3Divider = RCC_SYSCLK_DIV1;
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/* Error Handler -----------------------------------------------------------*/
 void Error_Handler(void)
 {
   __disable_irq();
@@ -332,7 +293,8 @@ void assert_failed(uint8_t *file, uint32_t line)
 {
   printf("Wrong parameters value: file %s on line %lu\r\n", file, line);
 }
-#endif /* USE_FULL_ASSERT */
+#endif
+
 ```
 
 
@@ -340,7 +302,8 @@ void assert_failed(uint8_t *file, uint32_t line)
 ## Output screen shots of serial port utility   :
 
 
-<img width="972" height="515" alt="image" src="https://github.com/user-attachments/assets/ad5481e7-4b1d-4846-bb7c-84c331f9a7ea" />
+<img width="1905" height="1088" alt="Screenshot 2025-10-25 091122" src="https://github.com/user-attachments/assets/0393dce6-8167-44e8-80d7-fa4ad6879409" />
+
 
 
  
